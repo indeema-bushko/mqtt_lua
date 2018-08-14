@@ -75,8 +75,13 @@ if (not isPsp()) then
   require("socket")
   require("io")
   require("ltn12")
---require("ssl")
+  require("ssl")
 end
+
+local socket = require("socket")
+local ssl = require("ssl")
+local io = require("io")
+local ltn12 = require("ltn12")
 
 local MQTT = {}
 
@@ -153,7 +158,72 @@ function MQTT.client.create(                                      -- Public API
   mqtt_client.outstanding   = {}
   mqtt_client.socket_client = nil
 
+-- SSL\TLS environment (certificate, key files)
+  mqtt_client.ca_certs = ''
+  mqtt_client.certfile = ''
+  mqtt_client.keyfile = ''
+  mqtt_client.params = {}
+
   return(mqtt_client)
+end
+
+-- ----------------------------------------------------------------------------
+-- Configure network encryption and authentication options. Enables SSL/TLS support.
+-- 	ca_certs : a string path to the Certificate Authority certificate files
+--      that are to be treated as trusted by this client. If this is the only
+--      option given then the client will operate in a similar manner to a web
+--      browser. That is to say it will require the broker to have a
+--      certificate signed by the Certificate Authorities in ca_certs and will
+--      communicate using TLS v1, but will not attempt any form of
+--      authentication. This provides basic network encryption but may not be
+--      sufficient depending on how the broker is configured.
+
+--      certfile: and keyfile are strings pointing to the PEM encoded client
+--      certificate and private keys respectively. If these arguments are not
+--      None then they will be used as client information for TLS based
+--      authentication.  Support for this feature is broker dependent. Note
+--      that if either of these files in encrypted and needs a password to
+--      decrypt it, Python will ask for the password at the command line. It is
+--      not currently possible to define a callback to provide the password.
+
+--	Unused:
+--      cert_reqs: allows the certificate requirements that the client imposes
+--      on the broker to be changed. By default this is ssl.CERT_REQUIRED,
+--      which means that the broker must provide a certificate. See the ssl
+--      pydoc for more information on this parameter.
+
+--	Unused: default(tlsv1_2)
+--      tls_version: allows the version of the SSL/TLS protocol used to be
+--      specified. By default TLS v1 is used. Previous versions (all versions
+--      beginning with SSL) are possible but not recommended due to possible
+--      security problems.
+
+--	Unused:
+--      ciphers: is a string specifying which encryption ciphers are allowable
+--      for this connection, or None to use the defaults. See the ssl pydoc for
+--      more information.
+-- ----------------------------------------------------------------------------
+function MQTT.client:tls_set(ca_certs, certfile, keyfile) -- cert_reqs = nil, tls_version = "tlsv1_2", ciphers = nil
+  print(" - MQTT.client.tls_set: tls_version:")
+  if (ca_certs ~= nil) then print("	- rootCA  : " .. ca_certs) end
+  if (certfile ~= nil) then print("	- certfile: " .. certfile) end
+  if (keyfile ~= nil) then print("	- keyfile : " .. keyfile) end
+
+  self.ca_certs = ca_certs
+  self.certfile = certfile
+  self.keyfile = keyfile
+
+-- Initialise params table for ssl/tls connection
+  self.params = {}
+  self.params["mode"] = "client"
+  self.params["protocol"] = "tlsv1_2"
+  if (keyfile ~= nil) then self.params["key"] = keyfile end
+  if (certfile ~= nil) then self.params["certificate"] = certfile end
+  if (ca_certs ~= nil) then self.params["cafile"] = ca_certs end
+  self.params["verify"] = "peer"
+  self.params["options"] = "all"
+
+  --self.params["ciphers"] = {}
 end
 
 -- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --
@@ -176,6 +246,19 @@ function MQTT.client:connect(                                     -- Public API
   MQTT.Utility.debug("MQTT.client:connect(): " .. identifier)
 
   self.socket_client = socket.connect(self.hostname, self.port)
+
+-- Check if secure ssl\tls connection
+  if next(self.params) == nil then
+     print(" - MQTT.client:connect -> Insecure connection")
+  else 
+    print(" - MQTT.client:connect -> Secure connection")
+    local ctx, e = ssl.newcontext(self.params)
+    if e ~= nil then print('New Context: ' .. e) end
+
+    self.socket_client = assert(ssl.wrap(self.socket_client, ctx))
+    self.socket_client:settimeout(MQTT.client.SOCKET_TIME_OUT)
+    self.socket_client:dohandshake()
+  end
 
   if (self.socket_client == nil) then
     return("MQTT.client:connect(): Couldn't open MQTT broker connection")
