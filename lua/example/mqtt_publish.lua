@@ -51,6 +51,9 @@ local args = lapp [[
   -w,--will_qos      (default 0)            Last will and testament QOS
   -w,--will_retain   (default 0)            Last will and testament retention
   -w,--will_topic    (default .)            Last will and testament topic
+  -r,--root_ca       (default .)            Path to Root CA file
+  -k,--key_file      (default .)            Path to private key file
+  -c,--cert_file     (default .)            Path to certificate file 
 ]]
 
 local MQTT = require("mqtt_library")
@@ -59,13 +62,32 @@ if (args.debug) then MQTT.Utility.set_debug(true) end
 
 local mqtt_client = MQTT.client.create(args.host, args.port)
 
+-- Define local variable for SSL\TLS connection
+local root_CA  = nil -- required for secure connection
+local keyFile  = nil -- optional for secure connection
+local certFile = nil -- optional for secure connection
+
+-- The root CA file is required for secure connection, proivate key and certificate is optional.
+-- If yes the Mqtt client will try to make a SSL\TLS connection.
+-- If the required file "rootCA" is not present the MQTT client will make unsecure connection
+if (args.root_ca ~= ".") then
+   root_CA = args.root_ca
+   -- Optional Private Key and Certificate file.
+   if (args.key_file ~= ".") then keyFile = args.key_file end
+   if (args.cert_file ~= ".") then certFile = args.cert_file end
+
+   -- Set SSL\TLS connection properties.
+   mqtt_client:tls_set(root_CA, certFile, keyFile)   
+end
+
 if (args.will_message == "."  or  args.will_topic == ".") then
   mqtt_client:connect(args.id)
 else
-  mqtt_client:connect(
-    args.id, args.will_topic, args.will_qos, args.will_retain, args.will_message
-  )
+  mqtt_client:connect( args.id, args.will_topic, args.will_qos, args.will_retain, args.will_message )
 end
+
+-- Test on WAS IoT MQTT client, required delay
+socket.sleep(1.0)
 
 mqtt_client:publish(args.topic, args.message)
 
